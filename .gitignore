@@ -1,0 +1,10 @@
+.pio
+.pioenvs
+.piolibdeps
+.clang_complete
+.gcc-flags.json
+*.yml
+README
+./include/
+test_scripts.py
+__pycache__
