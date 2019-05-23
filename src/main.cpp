@@ -11,9 +11,7 @@ void setup()
 
 void loop()
 {
-    // Serial.println("Entering Loop");
     arduino.read_terminal();
     arduino.collect_data();
     arduino.send_data();
-    // arduino.mode = state::SETUP;
 };

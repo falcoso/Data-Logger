@@ -4,7 +4,7 @@
 #include <fix_fft.h>
 #include <Arduino.h>
 
-#define FRAME_LEN 128
+#define FRAME_LEN 256
 #define SAMPLE_FREQ 4000
 #define BAUD 115200
 

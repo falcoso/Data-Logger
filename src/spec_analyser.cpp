@@ -13,6 +13,8 @@ void Analyser::setup()
     Serial.println("Setup Complete");
     Serial.print("Sample no: ");
     Serial.println(frame_len);
+    Serial.print("Sample freq: ");
+    Serial.println(sample_freq);
 };
 
 void Analyser::read_terminal()
@@ -55,10 +57,6 @@ void Analyser::send_data()
     if(mode == state::AUDIO)
     {
         Serial.write((char*)(datar), sizeof(datar));
-        // for(int i=0; i<FRAME_LEN; i++)
-        // {
-        //     Serial.println(datar[i]);
-        // }
     }
 }
 
