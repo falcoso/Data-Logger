@@ -48,23 +48,42 @@ def get_data(board, frame_len):
 
 if __name__ == "__main__":
     # log.basicConfig(level=log.DEBUG)
-    board = serial.Serial("/dev/ttyACM0", 115200, timeout=10)
+    try:
+        board = serial.Serial("/dev/ttyACM0", 115200, timeout=5)
 
-    sample_no, sample_freq = setup(board)
-    send_command("Audio", board)
-    data = get_data(board, sample_no)
-    log.debug(len(data))
-    data = data - np.mean(data)
-    data = np.abs(np.fft.rfft(data))
-    freq_bins = np.fft.rfftfreq(len(data)*2 -1, 1/sample_freq)
-    fig, ax = plt.subplots()
-    line, = ax.plot(freq_bins, data)
-    plt.show(block=False)
+        sample_no, sample_freq = setup(board)
+        # tell Arduino to start sending data
+        send_command("Audio", board)
 
-    while True:
-        data = get_data(board, sample_no)
-        data = data - np.mean(data)
-        data = np.abs(np.fft.rfft(data))
-        line.set_ydata(data)
-        fig.canvas.draw()
-        fig.canvas.flush_events()
+        # get initial set of data
+        data_time = get_data(board, sample_no)
+        data_time = data_time - np.mean(data_time)
+        freq_bins = np.fft.rfftfreq(len(data_time), 1/sample_freq)
+        time_stamp = np.linspace(0, len(data_time)/sample_freq, len(data_time))
+        print(time_stamp)
+        data_freq = np.abs(np.fft.rfft(data_time))
+        fig, (ax1, ax2) = plt.subplots(2)
+        line1, = ax1.plot(freq_bins, data_freq)
+        line2, = ax2.plot(time_stamp, data_time)
+        ax1.set_ylim(bottom=0)
+        ax1.set_xlim(0, sample_freq/2)
+        plt.show(block=False)
+
+        while True:
+            data_time = get_data(board, sample_no)
+            data_time = data_time - np.mean(data_time)
+            data_freq = np.abs(np.fft.rfft(data_time))
+            # reset the height if it changes too much
+            if data_freq.max() > ax1.get_ylim()[1] or data_freq.max() < ax1.get_ylim()[1]/2:
+                ax1.set_ylim(0, data_freq.max()*1.1)
+            if data_time.max() > ax2.get_ylim()[1] or data_time.max() < ax2.get_ylim()[1]/2:
+                ax2.set_ylim(-data_time.max()*1.1, data_time.max()*1.1)
+            line1.set_ydata(data_freq)
+            line2.set_ydata(data_time)
+            fig.canvas.draw()
+            fig.canvas.flush_events()
+
+    except Exception as e:
+        print("Caught in exceptio")
+        board.close()
+        raise e
