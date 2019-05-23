@@ -6,6 +6,7 @@
 
 #define FRAME_LEN 128
 #define SAMPLE_FREQ 4000
+#define BAUD 115200
 
 enum class state{SETUP, FFT, AUDIO};
 
@@ -19,7 +20,7 @@ public:
     int datai[FRAME_LEN];
 
     Analyser();
-    void setup(int baud);
+    void setup();
     void read_terminal();
     void collect_data();
     void send_data();

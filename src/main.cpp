@@ -1,18 +1,17 @@
 #include <Arduino.h>
 #include "spec_analyser.h"
 
-#define BAUD 74880
-
 Analyser arduino;
 
 void setup()
 {
     arduino = Analyser();
-    arduino.setup(BAUD);
+    arduino.setup();
 };
 
 void loop()
 {
+    // Serial.println("Entering Loop");
     arduino.read_terminal();
     arduino.collect_data();
     arduino.send_data();

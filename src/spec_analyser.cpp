@@ -7,12 +7,12 @@ Analyser::Analyser()
     sample_freq = SAMPLE_FREQ;
 };
 
-void Analyser::setup(int baud)
+void Analyser::setup()
 {
-    Serial.begin(115200);
-    // Serial.println("Setup Complete");
-    // Serial.print("Sample no: ");
-    // Serial.println(frame_len);
+    Serial.begin(BAUD);
+    Serial.println("Setup Complete");
+    Serial.print("Sample no: ");
+    Serial.println(frame_len);
 };
 
 void Analyser::read_terminal()
