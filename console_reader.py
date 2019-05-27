@@ -6,6 +6,7 @@ import serial
 import logging as log
 import struct
 
+
 class ArduinoBoard:
     def __init__(self, port, baud, timeout):
         self.board = serial.Serial(port, baud, timeout=timeout)
@@ -22,7 +23,7 @@ class ArduinoBoard:
         log.debug("[+] Sample rate: {}".format(frame_len))
         sample_freq = str(self.board.readline(), "utf-8").split(":")
         sample_freq = int(sample_freq[-1])
-        log.debug("[+] Sample rate: {}".format(sample_freq))
+        log.debug("[+] Sample freq: {}".format(sample_freq))
         return frame_len, sample_freq
 
     def send_command(self, message):
@@ -50,6 +51,7 @@ class ArduinoBoard:
         data = np.array(struct.unpack('h'*self.sample_no, data))
         return data
 
+
 class SpectrumAnalyser:
     def __init__(self):
 
@@ -65,45 +67,36 @@ class SpectrumAnalyser:
         self.app = QtGui.QApplication(sys.argv)
         self.win = pg.GraphicsWindow(title='Spectrum Analyzer')
         self.win.setWindowTitle('Spectrum Analyzer')
-        # self.win.setGeometry(5, 115, 1910, 1070)
-
-        wf_xaxis = pg.AxisItem(orientation='bottom')
-
-        wf_yaxis = pg.AxisItem(orientation='left')
-
-        sp_xaxis = pg.AxisItem(orientation='bottom')
 
         self.waveform = self.win.addPlot(
-            title='WAVEFORM', row=1, col=1, axisItems={'bottom': wf_xaxis, 'left': wf_yaxis},
-        )
+            title='WAVEFORM', row=1, col=1, labels={'bottom': "Time (s)"})
         self.spectrum = self.win.addPlot(
-            title='SPECTRUM', row=1, col=2, axisItems={'bottom': sp_xaxis},
-        )
+            title='SPECTRUM', row=1, col=2, labels={'bottom': "Frequency (Hz)"})
+        self.specgram = self.win.addPlot(
+            title='SPECTROGRAM', row=2, col=1, colspan=2,
+            labels={'bottom': "Frequency (Hz)"})
 
         # waveform and spectrum x points
         self.x = np.linspace(0, self.sample_no/self.sample_freq, self.sample_no)
         self.f = np.fft.rfftfreq(self.sample_no, 1/self.sample_freq)
 
         self.img = pg.ImageItem()
-        self.view = self.win.addViewBox(row=2, col=1, rowspan=2)
-        self.view.addItem(self.img)
-        self.win.addItem(self.view, row=2, col=1, colspan=2)
+        self.specgram.addItem(self.img)
 
         self.img_array = np.zeros((1000, int(self.sample_no/2+1)))
 
         # bipolar colormap
-
         pos = np.array([0., 1., 0.5, 0.25, 0.75])
-        color = np.array([[0,255,255,255], [255,255,0,255], [0,0,0,255], (0, 0, 255, 255), (255, 0, 0, 255)], dtype=np.ubyte)
+        color = np.array([[0, 255, 255, 255], [255, 255, 0, 255], [0, 0, 0, 255],
+                          (0, 0, 255, 255), (255, 0, 0, 255)], dtype=np.ubyte)
         cmap = pg.ColorMap(pos, color)
         lut = cmap.getLookupTable(0.0, 1.0, 256)
 
         self.img.setLookupTable(lut)
-        self.img.setLevels([-50,40])
+        self.img.setLevels([20*np.log10(0.01), 20*np.log10(20000)])
 
         yscale = 1.0/(self.img_array.shape[1]/self.f[-1])
-        self.img.scale((1./self.sample_freq)*self.sample_no, yscale)
-        # self.img.setLabel('left', 'Frequency', units='Hz')
+        self.img.scale(self.sample_freq/self.sample_no, yscale)
 
     def start(self):
         if (sys.flags.interactive != 1) or not hasattr(QtCore, 'PYQT_VERSION'):
@@ -119,7 +112,7 @@ class SpectrumAnalyser:
                 self.waveform.setXRange(0, self.x.max(), padding=0.005)
             if name == 'spectrum':
                 self.traces[name] = self.spectrum.plot(pen='m', width=3)
-                # self.spectrum.setLogMode(x=True, y=True)
+                # self.spectrum.setLogMode(y=True)
                 self.spectrum.setYRange(0, 10000, padding=0)
                 self.spectrum.setXRange(0, self.f.max(), padding=0.005)
 
@@ -142,13 +135,14 @@ class SpectrumAnalyser:
         self.img_array = np.roll(self.img_array, -1, 0)
         self.img_array[-1:] = psd
 
-        self.img.setImage(np.transpose(self.img_array), autoLevels=True)
+        self.img.setImage(np.transpose(self.img_array), autoLevels=False)
 
     def animation(self):
         timer = QtCore.QTimer()
         timer.timeout.connect(self.update)
         timer.start(20)
         self.start()
+
 
 if __name__ == "__main__":
     # log.basicConfig(level=log.DEBUG)
