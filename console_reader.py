@@ -61,12 +61,17 @@ class SpectrumAnalyser:
         # tell Arduino to start sending data
         self.board.send_command("Audio")
 
+        # self.inputHandler = KeyPressWindow()
+        # self.inputHandler.sigKeyPress.connect(keyPressed)
+
         # pyqtgraph stuff
         pg.setConfigOptions(antialias=True)
         self.traces = dict()
         self.app = QtGui.QApplication(sys.argv)
-        self.win = pg.GraphicsWindow(title='Spectrum Analyzer')
+        self.win = KeyPressWindow(title='Spectrum Analyzer')
         self.win.setWindowTitle('Spectrum Analyzer')
+
+        self.win.sigKeyPress.connect(keyPressed)
 
         self.waveform = self.win.addPlot(
             title='WAVEFORM', row=1, col=1, labels={'bottom': "Time (s)"})
@@ -83,7 +88,7 @@ class SpectrumAnalyser:
         self.img = pg.ImageItem()
         self.specgram.addItem(self.img)
 
-        self.img_array = np.zeros((1000, int(self.sample_no/2+1)))
+        self.img_array = np.zeros((100, int(self.sample_no/2+1)))
 
         # bipolar colormap
         pos = np.array([0., 1., 0.5, 0.25, 0.75])
@@ -93,7 +98,7 @@ class SpectrumAnalyser:
         lut = cmap.getLookupTable(0.0, 1.0, 256)
 
         self.img.setLookupTable(lut)
-        self.img.setLevels([20*np.log10(0.01), 20*np.log10(20000)])
+        # self.img.setLevels([20*np.log10(0.01), 20*np.log10(20000)])
 
         yscale = 1.0/(self.img_array.shape[1]/self.f[-1])
         self.img.scale(self.sample_freq/self.sample_no, yscale)
@@ -129,13 +134,13 @@ class SpectrumAnalyser:
 
     def spectrogram_update(self, sp_data):
         # convert to dB
-        psd = 20 * np.log10(sp_data + 0.01*np.ones(len(sp_data)))
+        psd = 20 * np.log10(sp_data+ np.ones(len(sp_data))*0.001)
 
         # roll down one and replace leading edge with new data
-        self.img_array = np.roll(self.img_array, -1, 0)
-        self.img_array[-1:] = psd
+        self.img_array = np.roll(self.img_array, 1, 0)
+        self.img_array[0] = psd
 
-        self.img.setImage(np.transpose(self.img_array), autoLevels=False)
+        self.img.setImage(np.transpose(self.img_array), autoLevels=True)
 
     def animation(self):
         timer = QtCore.QTimer()
@@ -143,6 +148,19 @@ class SpectrumAnalyser:
         timer.start(20)
         self.start()
 
+class KeyPressWindow(pg.GraphicsWindow):
+    sigKeyPress = QtCore.pyqtSignal(object)
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def keyPressEvent(self, ev):
+        self.scene().keyPressEvent(ev)
+        self.sigKeyPress.emit(ev)
+
+
+def keyPressed(evt):
+    print("Key pressed")
 
 if __name__ == "__main__":
     # log.basicConfig(level=log.DEBUG)
