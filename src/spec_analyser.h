@@ -5,7 +5,9 @@
 #include <Arduino.h>
 
 #define FRAME_LEN 400
-#define SAMPLE_FREQ 4000
+#define SAMPLE_FREQ1 4000
+#define SAMPLE_FREQ2 6000
+#define SAMPLE_FREQ3 8000
 #define BAUD 115200
 
 enum class state{SETUP, FFT, AUDIO};
