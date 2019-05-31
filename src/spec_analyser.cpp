@@ -5,6 +5,11 @@ Analyser::Analyser()
     mode = state::SETUP;
     frame_len = FRAME_LEN;
     sample_freq = SAMPLE_FREQ;
+    pinMode(3, OUTPUT);
+    pinMode(4, OUTPUT);
+    pinMode(5, OUTPUT);
+    pinMode(6, OUTPUT);
+    pinMode(7, OUTPUT);
 };
 
 void Analyser::setup()
@@ -23,16 +28,22 @@ void Analyser::read_terminal()
     if(!Serial.available()) return;
 
     cmd = Serial.read() - '0';
-    if(cmd <4)
+    if(cmd < 3)
     {
         mode = static_cast<state>(cmd);
         Serial.print("Recieved: ");
         Serial.println(static_cast<int>(mode));
     }
+    else if(cmd < 9)
+    {
+        Serial.print("Recieved: ");
+        Serial.println(cmd);
+        digitalWrite(cmd, !digitalRead(cmd));
+    }
     else
     {
-        Serial.println("Command not recognised");
-    };
+        Serial.println("Command Not Found");
+    }
 };
 
 void Analyser::collect_data()
@@ -58,9 +69,4 @@ void Analyser::send_data()
     {
         Serial.write((char*)(datar), sizeof(datar));
     }
-}
-
-void Analyser::fft_data()
-{
-
 }

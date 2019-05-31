@@ -11,6 +11,7 @@ class ArduinoBoard:
     def __init__(self, port, baud, timeout):
         self.board = serial.Serial(port, baud, timeout=timeout)
         self.sample_no, self.sample_freq = self.setup()
+        self.LED = None
         return
 
     def setup(self):
@@ -45,6 +46,20 @@ class ArduinoBoard:
             raise RuntimeError("Unable to acknowledge message:{}".format(line))
         return
 
+    def change_LED(self, led):
+        if isinstance(led, int):
+            led = str(led)
+        ledencode = {'1': '4', '2': '5', '3': '6', '4': '8', '5': '7'}
+        try:
+            if led != self.LED:
+                self.board.write(ledencode[led].encode("utf-8"))
+                self.board.write(ledencode[self.LED].encode("utf-8"))
+                self.LED = led
+
+        except KeyError:
+            pass
+        return
+
     def get_data(self):
         data = self.board.read(self.sample_no*2)
         log.debug(len(data))
@@ -58,11 +73,12 @@ class SpectrumAnalyser:
         self.board = ArduinoBoard("/dev/ttyACM0", 115200, timeout=5)
         self.sample_no = self.board.sample_no
         self.sample_freq = self.board.sample_freq
+
+        self.NOTES = np.array([440, 493.88, 523.25, 587.33, 659.25, 698.46, 783.99, 880])
+        self.note_keys = ["A", "B", "C", "D", "E", "F", "G", "A+"]
+        self.note_dict = dict([(freq, note) for freq, note in zip(self.NOTES, self.note_keys)])
         # tell Arduino to start sending data
         self.board.send_command("Audio")
-
-        # self.inputHandler = KeyPressWindow()
-        # self.inputHandler.sigKeyPress.connect(keyPressed)
 
         # pyqtgraph stuff
         pg.setConfigOptions(antialias=True)
@@ -71,7 +87,7 @@ class SpectrumAnalyser:
         self.win = KeyPressWindow(title='Spectrum Analyzer')
         self.win.setWindowTitle('Spectrum Analyzer')
 
-        self.win.sigKeyPress.connect(keyPressed)
+        self.win.sigKeyPress.connect(lambda x: self.win.keyPressed(self.board, x))
 
         self.waveform = self.win.addPlot(
             title='WAVEFORM', row=1, col=1, labels={'bottom': "Time (s)"})
@@ -107,19 +123,52 @@ class SpectrumAnalyser:
         if (sys.flags.interactive != 1) or not hasattr(QtCore, 'PYQT_VERSION'):
             QtGui.QApplication.instance().exec_()
 
+    def align_music(self, freq):
+        while freq < self.NOTES.min() or freq > self.NOTES.max():
+            while freq > self.NOTES.max():
+                self.NOTES *= 2
+            while freq < self.NOTES.min():
+                self.NOTES /= 2
+        self.note_dict = dict([(freq, note) for freq, note in zip(self.NOTES, self.note_keys)])
+        return
+
     def set_plotdata(self, name, data_x, data_y):
         if name in self.traces:
             self.traces[name].setData(data_x, data_y)
         else:
             if name == 'waveform':
                 self.traces[name] = self.waveform.plot(pen='c', width=3)
-                self.waveform.setYRange(-100, 100, padding=0)
+                self.waveform.setYRange(0, 1000, padding=0)
                 self.waveform.setXRange(0, self.x.max(), padding=0.005)
             if name == 'spectrum':
                 self.traces[name] = self.spectrum.plot(pen='m', width=3)
-                # self.spectrum.setLogMode(y=True)
-                self.spectrum.setYRange(0, 10000, padding=0)
+                self.spectrum.setYRange(0, 2000, padding=0)
                 self.spectrum.setXRange(0, self.f.max(), padding=0.005)
+
+    def tune(self, sp_data):
+        freq_peak = self.f[np.argmax(sp_data[10:])]
+        self.align_music(freq_peak)
+        tuning_freq = min(self.NOTES, key=lambda x: abs(x-freq_peak))
+        index_freq = np.argwhere(self.NOTES == tuning_freq)[0]
+        bands = np.zeros(5)
+        bands[2] = tuning_freq
+        if index_freq == 0:
+            bands[0] = (tuning_freq + self.NOTES[-1]/2)/2
+        else:
+            bands[0] = (tuning_freq + self.NOTES[index_freq-1])/2
+
+        if index_freq == len(self.NOTES)-1:
+            bands[4] = (tuning_freq + self.NOTES[0]*2)/2
+        else:
+            bands[4] = (tuning_freq + self.NOTES[index_freq+1]*2)/2
+
+        bands[1] = (bands[0] + bands[2])/2
+        bands[3] = (bands[4] + bands[2])/2
+        bands -= freq_peak
+        LED = np.argmin(np.abs(bands))
+        # print(tuning_freq)
+        self.board.change_LED(LED)
+        return
 
     def update(self):
         wf_data = self.board.get_data()
@@ -127,6 +176,7 @@ class SpectrumAnalyser:
         self.set_plotdata(name='waveform', data_x=self.x, data_y=wf_data,)
 
         sp_data = np.abs(np.fft.rfft(wf_data))
+        self.tune(sp_data)
 
         self.set_plotdata(name='spectrum', data_x=self.f, data_y=sp_data)
 
@@ -134,7 +184,7 @@ class SpectrumAnalyser:
 
     def spectrogram_update(self, sp_data):
         # convert to dB
-        psd = 20 * np.log10(sp_data+ np.ones(len(sp_data))*0.001)
+        psd = 20 * np.log10(sp_data + np.ones(len(sp_data))*0.001)
 
         # roll down one and replace leading edge with new data
         self.img_array = np.roll(self.img_array, 1, 0)
@@ -148,6 +198,7 @@ class SpectrumAnalyser:
         timer.start(20)
         self.start()
 
+
 class KeyPressWindow(pg.GraphicsWindow):
     sigKeyPress = QtCore.pyqtSignal(object)
 
@@ -158,9 +209,9 @@ class KeyPressWindow(pg.GraphicsWindow):
         self.scene().keyPressEvent(ev)
         self.sigKeyPress.emit(ev)
 
+    def keyPressed(self, board, evt):
+        board.change_LED(chr(evt.key()))
 
-def keyPressed(evt):
-    print("Key pressed")
 
 if __name__ == "__main__":
     # log.basicConfig(level=log.DEBUG)
