@@ -2,7 +2,7 @@
 #include "spec_analyser.h"
 
 Analyser arduino;
-
+char x = 5;
 void setup()
 {
     arduino = Analyser();

@@ -27,6 +27,7 @@ void Analyser::read_terminal()
     int cmd;
     if(!Serial.available()) return;
 
+
     cmd = Serial.read() - '0';
     if (cmd == 0) sample_freq = SAMPLE_FREQ1;
     else if(cmd < 3) mode = static_cast<state>(cmd);
@@ -46,23 +47,30 @@ void Analyser::collect_data()
 {
     unsigned long microseconds;
     unsigned int sampling_period_us = round(1000000*(1.0/sample_freq));
+    static float x_old = 0;
+    static float y_old = 0;
+    float x;
+    float y;
+    // int x_old=0;
 
     for(int i=0; i<FRAME_LEN; i++)
     {
         microseconds = micros();    //Overflows after around 70 minutes!
-
-        datar[i] = analogRead(0);
-        datai[i] = 0;
-
-        while(micros() < (microseconds + sampling_period_us)){
-        }
+        //Apply DC block to data
+        x = (float)(analogRead(0));
+        y = x - x_old + 0.995* y_old;
+        data[i] = (char)(y);
+        x_old = x;
+        y_old = y;
+        while(micros() < (microseconds + sampling_period_us)){}
     }
+    // store final element for first element of new frame
 }
 
 void Analyser::send_data()
 {
     if(mode == state::AUDIO)
     {
-        Serial.write((char*)(datar), sizeof(datar));
+        Serial.write(data, sizeof(data));
     }
 }

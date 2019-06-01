@@ -5,6 +5,7 @@ import sys
 import serial
 import logging as log
 import struct
+import copy
 
 
 class ArduinoBoard:
@@ -112,16 +113,19 @@ class ArduinoBoard:
         line = self.board.readline()
         # check confirmation:
         log.info("[+] Response: {}".format(line))
-        line = str(line, "utf-8")
-        if message not in line:
-            print("[+] ERROR: Unable to acknowledge message:{}".format(line))
+        try:
+            line = str(line, "utf-8")
+            if message not in line:
+                print("[+] ERROR: Unable to acknowledge message:{}".format(line))
+        except UnicodeDecodeError:
+            pass
         return
 
     def get_data(self):
         """Reads data from the Arduino"""
-        data = self.board.read(self.sample_no*2)
+        data = self.board.read(self.sample_no)
         log.debug(len(data))
-        data = np.array(struct.unpack('h'*self.sample_no, data))
+        data = np.array(struct.unpack('b'*self.sample_no, data))
         return data
 
 
@@ -212,7 +216,7 @@ class SpectrumAnalyser:
         lut = cmap.getLookupTable(0.0, 1.0, 256)
 
         self.img.setLookupTable(lut)
-        # self.img.setLevels([20*np.log10(0.01), 20*np.log10(20000)])
+        self.img.setLevels([20*np.log10(1), 20*np.log10(600)])
 
         # waveform and spectrum x points
         self.scale_plots()
@@ -270,10 +274,10 @@ class SpectrumAnalyser:
         else:
             if name == 'waveform':
                 self.traces[name] = self.waveform.plot(pen='c', width=3)
-                self.waveform.setYRange(-20, 20, padding=0)
+                self.waveform.setYRange(-100, 100, padding=0)
             if name == 'spectrum':
                 self.traces[name] = self.spectrum.plot(pen='m', width=3)
-                self.spectrum.setYRange(0, 2000, padding=0)
+                self.spectrum.setYRange(0, 1000, padding=0)
 
     def tune(self, sp_data):
         """
@@ -306,7 +310,7 @@ class SpectrumAnalyser:
     def update(self):
         """Gathers new data and updates all the plots"""
         wf_data = self.board.get_data()
-        wf_data -= int(np.mean(wf_data))
+        wf_data2 =wf_data - int(np.mean(wf_data))
         self.set_plotdata(name='waveform', data_x=self.x, data_y=wf_data,)
 
         sp_data = np.abs(np.fft.rfft(wf_data))
@@ -325,7 +329,7 @@ class SpectrumAnalyser:
         self.img_array = np.roll(self.img_array, 1, 0)
         self.img_array[0] = psd
 
-        self.img.setImage(np.transpose(self.img_array), autoLevels=True)
+        self.img.setImage(np.transpose(self.img_array), autoLevels=False)
 
     def animation(self):
         timer = QtCore.QTimer()
@@ -344,10 +348,8 @@ class KeyPressWindow(pg.GraphicsWindow):
 
     Parameters
     ----------
-    *args : type
-        pg.GraphicsWindow() *args
-    **kwargs : type
-        pg.GraphicsWindow() **kwarg.
+    *args : pg.GraphicsWindow() *args
+    **kwargs : pg.GraphicsWindow() **kwarg.
 
     Attributes
     ----------
@@ -366,6 +368,6 @@ class KeyPressWindow(pg.GraphicsWindow):
 
 
 if __name__ == "__main__":
-    # log.basicConfig(level=log.INFO)
+    # log.basicConfig(level=log.DEBUG)
     audio_app = SpectrumAnalyser()
     audio_app.animation()
