@@ -1,13 +1,14 @@
 import scipy.signal as sp
 import numpy as np
 
+
 class DataLogger:
     def __init__(self, frame_len, sample_freq):
         self.frame_len = frame_len
         self.sample_freq = sample_freq
         self.spec_size = 100
 
-        self.specgram = np.zeros((self.spec_size, int(self.sample_no/2+1)))
+        self.specgram = np.zeros((self.spec_size, int(self.frame_len/2+1)))
 
         self.freq_lo = 100
         self.freq_hi = 2500
@@ -30,14 +31,23 @@ class DataLogger:
         except ValueError:
             pass
 
-    def set_sample_freq(self, freq):
-        self.sample_freq = freq
-        self.set_filters()
+    def get_data_axis(self):
         freq_bins = np.fft.rfftfreq(self.frame_len, 1/self.sample_freq)
         time_bins = np.linspace(0, self.frame_len/self.sample_freq, self.frame_len)
         return freq_bins, time_bins
 
-    def set_low_cutoff(self,freq):
+    def set_sample_freq(self, freq):
+        self.sample_freq = freq
+        self.set_filters()
+        self.specgram = np.zeros((self.spec_size, int(self.frame_len/2+1)))
+        return self.get_data_axis()
+
+    def set_frame_len(self, frame_len):
+        self.frame_len = frame_len
+        self.specgram = np.zeros((self.spec_size, int(self.frame_len/2+1)))
+        return self.get_data_axis()
+
+    def set_low_cutoff(self, freq):
         self.freq_lo = freq
         self.set_filters()
         return
@@ -47,10 +57,12 @@ class DataLogger:
         self.set_filters()
         return
 
-
     def process(self, wf_data):
+        # high pass filter
         wf_data = sp.filtfilt(self.blo, self.alo, wf_data)
-        if self.fc < self.sample_freq/2:
+
+        # if sampling frequency allows, low pass filter to reduce quantisation
+        if self.freq_hi < self.sample_freq/2:
             wf_data = sp.filtfilt(self.b, self.a, wf_data)
 
         sp_data = np.abs(np.fft.rfft(wf_data))

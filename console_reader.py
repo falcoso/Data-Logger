@@ -8,6 +8,7 @@ import struct
 import imagehash
 from PIL import Image
 from arduino import ArduinoBoard
+from data_logger import DataLogger
 
 class SpectrumGUI:
     """
@@ -57,17 +58,8 @@ class SpectrumGUI:
 
     def __init__(self):
         self.board = ArduinoBoard("/dev/ttyACM0", 230400, timeout=5)
-        self.sample_no = self.board.sample_no
-        self.sample_freq = self.board.sample_freq
-        self.fc = 2500
-        self.fcl = 100
-        fn = self.fc/self.sample_freq
-        fnlo = self.fcl/self.sample_freq
-        self.blo, self.alo = sp.butter(2, fnlo*2, btype='highpass')
-        try:
-            self.b, self.a = sp.butter(2, fn*2)
-        except ValueError:
-            pass
+        self.data_analyser = DataLogger(self.board.sample_no, self.board.sample_freq)
+        self.f, self.x = self.data_analyser.set_sample_freq(self.board.sample_freq)
 
         self.record_counter =0
         self.lock_hash = None
@@ -75,7 +67,6 @@ class SpectrumGUI:
         self.mode = None
         self.xscale = 1
         self.yscale = 1
-        self.lock_sequence = []
 
         self.NOTES = np.array([440, 493.88, 523.25, 587.33, 659.25, 698.46, 783.99, 880])
         self.note_keys = ["A", "B", "C", "D", "E", "F", "G", "A+"]
@@ -101,7 +92,6 @@ class SpectrumGUI:
 
         self.img = pg.ImageItem()
         self.specgram.addItem(self.img)
-        self.img_array = np.zeros((100, int(self.sample_no/2+1)))
 
         # bipolar colormap
         pos = np.array([0., 1., 0.5, 0.25, 0.75])
@@ -131,22 +121,15 @@ class SpectrumGUI:
             msg = int(msg)
         if msg in {0, 8, 9}:
             if msg == 0:
-                self.sample_freq = 4000
+                self.f, self.x = self.data_analyser.set_sample_freq(4000)
                 self.board.sample_freq = 4000
             elif msg == 8:
-                self.sample_freq = 7000
+                self.f, self.x = self.data_analyser.set_sample_freq(7000)
                 self.board.sample_freq = 7000
             elif msg == 9:
-                self.sample_freq = 9000
+                self.f, self.x = self.data_analyser.set_sample_freq(9000)
                 self.board.sample_freq = 9000
 
-            fn = self.fc/self.sample_freq
-            fnlo = self.fcl/self.sample_freq
-            self.blo, self.alo = sp.butter(2, fnlo*2, btype='highpass')
-            try:
-                self.b, self.a = sp.butter(2, fn*2)
-            except ValueError:
-                pass
             self.scale_plots()
             self.board.send_command(msg)
 
@@ -168,11 +151,7 @@ class SpectrumGUI:
                 new_fc = int(cmd[1])
                 if new_fc > 4500:
                     raise ValueError('')
-                self.fc = int(cmd[1])
-                fn = self.fc/self.sample_freq
-                fnlo = self.fcl/self.sample_freq
-                self.blo, self.alo = sp.butter(2, fnlo*2, btype='highpass')
-                self.b, self.a = sp.butter(2, fn*2)
+                self.data_analyser.set_high_cutoff(new_fc)
             except ValueError:
                 print("Filter Frequency must be < 4.5k")
                 return
@@ -183,20 +162,11 @@ class SpectrumGUI:
                 if cmd not in {4, 7, 9}:
                     raise ValueError()
                 else:
-                    self.sample_freq = cmd*1000
+                    self.f, self.x = self.data_analyser.set_sample_freq(cmd*1000)
                     self.board.sample_freq = cmd*1000
-
             except ValueError:
                 print("Sample rate must be 4, 7, or 9 kHz")
                 return
-
-            fn = self.fc/self.sample_freq
-            fnlo = self.fcl/self.sample_freq
-            self.blo, self.alo = sp.butter(2, fnlo*2, btype='highpass')
-            try:
-                self.b, self.a = sp.butter(2, fn*2)
-            except ValueError:
-                pass
 
             self.board.send_command("Sample {}k".format(int(cmd)))
             self.scale_plots()
@@ -207,9 +177,8 @@ class SpectrumGUI:
                 if cmd not in {256, 512, 800, 1024}:
                     raise ValueError()
                 else:
-                    self.sample_no = cmd
+                    self.f, self.x = self.data_analyser.set_frame_len(cmd)
                     self.board.sample_no = cmd
-                self.img_array = np.zeros((100, int(self.sample_no/2+1)))
                 self.board.send_command("Frame {}".format(cmd))
                 self.scale_plots()
             except ValueError:
@@ -218,13 +187,13 @@ class SpectrumGUI:
 
     def scale_plots(self):
         """Scales the figures based on the current sampling frequency"""
-        self.x = np.linspace(0, self.sample_no/self.sample_freq, self.sample_no)
-        self.f = np.fft.rfftfreq(self.sample_no, 1/self.sample_freq)
         self.waveform.setXRange(0, self.x.max(), padding=0.005)
         self.spectrum.setXRange(0, self.f.max(), padding=0.005)
         self.specgram.setXRange(0, self.f.max(), padding=0.005)
-        yscale = self.sample_freq/(self.img_array.shape[1]*self.yscale)
-        xscale = self.sample_freq/(self.sample_no*self.xscale)
+        yscale = self.data_analyser.sample_freq/(self.data_analyser.get_specgram().shape[1]*
+                                                 self.yscale)
+
+        xscale = self.data_analyser.sample_freq/(self.data_analyser.frame_len*self.xscale)
         self.img.scale(xscale, yscale)
         self.xscale *= xscale
         self.yscale *= yscale
@@ -328,36 +297,20 @@ class SpectrumGUI:
             print("[+] Unpacking error")
             return
 
-        # if the sample rate is high enough, filter to reduce quantisation error
-        wf_data = sp.filtfilt(self.blo, self.alo, wf_data)
-        if self.fc < self.sample_freq/2:
-            wf_data = sp.filtfilt(self.b, self.a, wf_data)
+        sp_data, wf_data = self.data_analyser.process(wf_data)
+
 
         self.set_plotdata(name='waveform', data_x=self.x, data_y=wf_data,)
-
-        sp_data = np.abs(np.fft.rfft(wf_data))
-
         self.set_plotdata(name='spectrum', data_x=self.f, data_y=sp_data)
+        self.img.setImage(self.data_analyser.get_specgram().T,
+                          autoLevels=False)
 
-        self.spectrogram_update(sp_data)
         if self.mode == 'tune':
             freq_peak = self.f[np.argmax(sp_data[10:])]
             self.tune(freq_peak)
         elif self.mode == 'record':
             freq_peak = self.f[np.argmax(sp_data[10:])]
             self.record(freq_peak)
-
-    def spectrogram_update(self, sp_data):
-        """Updates the spectrogram plot"""
-        # convert to dB
-        psd = 20 * np.log10(sp_data + np.ones(len(sp_data))*0.1)
-        # psd = sp_data
-
-        # roll down one and replace leading edge with new data
-        self.img_array = np.roll(self.img_array, 1, 0)
-        self.img_array[0] = psd
-
-        self.img.setImage(np.transpose(self.img_array), autoLevels=False)
 
     def animation(self):
         timer = QtCore.QTimer()
