@@ -8,3 +8,4 @@ README
 ./include/
 test_scripts.py
 __pycache__
+test_files/
