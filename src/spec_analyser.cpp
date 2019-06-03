@@ -31,7 +31,7 @@ void Analyser::read_terminal()
     cmd = Serial.read();
 
     //go through non-numeric commands
-    if(cmd=='a' or cmd == 'b' or cmd=='c')
+    if(cmd=='a' or cmd == 'b' or cmd=='c' or cmd == 'd')
     {
         if (cmd =='a') frame_len = 256;
         else if (cmd =='b') frame_len = 512;
@@ -39,11 +39,13 @@ void Analyser::read_terminal()
         else if (cmd =='d') frame_len = 1024;
         Serial.print("Recieved: ");
         Serial.println(static_cast<char>(cmd));
+        return;
     }
     else cmd -= '0';
 
     // go through numeric commands
-    if (cmd == 0) sample_freq = SAMPLE_FREQ1;
+    if (cmd < 0) Serial.println("Command Not Found");
+    else if (cmd == 0) sample_freq = SAMPLE_FREQ1;
     else if(cmd < 3) mode = static_cast<state>(cmd);
     else if(cmd < 8)
     {   // two of the LEDs are mounted the wrong way round, so swap them so they
@@ -60,7 +62,7 @@ void Analyser::read_terminal()
     else if(cmd == 8) sample_freq = SAMPLE_FREQ2;
     else if(cmd == 9) sample_freq = SAMPLE_FREQ3;
 
-    if (cmd <= 9)
+    if (cmd <= 9 and cmd >=0)
     {
         // swap back
         if(cmd == 6)      cmd=7;

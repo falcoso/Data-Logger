@@ -6,7 +6,6 @@ import sys
 import serial
 import logging as log
 import struct
-import copy
 
 
 class ArduinoBoard:
@@ -131,7 +130,11 @@ class ArduinoBoard:
     def get_data(self):
         """Reads data from the Arduino"""
         data = self.board.read(self.sample_no)
-        data = np.array(struct.unpack('b'*self.sample_no, data))
+        try:
+            data = np.array(struct.unpack('b'*self.sample_no, data))
+        except struct.error as e:
+            print(data)
+            raise e
         return data
 
 
@@ -189,12 +192,16 @@ class SpectrumAnalyser:
         self.fcl = 100
         fn = self.fc/self.sample_freq
         fnlo = self.fcl/self.sample_freq
+        self.blo, self.alo = sp.butter(2, fnlo*2, btype='highpass')
         try:
-            self.b, self.a = sp.butter(4, [fnlo*2,fn*2], btype='bandpass')
+            self.b, self.a = sp.butter(2, fn*2)
         except ValueError:
             pass
+
+        self.mode = None
         self.xscale = 1
         self.yscale = 1
+        self.lock_sequence = []
 
         self.NOTES = np.array([440, 493.88, 523.25, 587.33, 659.25, 698.46, 783.99, 880])
         self.note_keys = ["A", "B", "C", "D", "E", "F", "G", "A+"]
@@ -262,8 +269,9 @@ class SpectrumAnalyser:
 
             fn = self.fc/self.sample_freq
             fnlo = self.fcl/self.sample_freq
+            self.blo, self.alo = sp.butter(2, fnlo*2, btype='highpass')
             try:
-                self.b, self.a = sp.butter(4, [fnlo*2,fn*2], btype='bandpass')
+                self.b, self.a = sp.butter(2, fn*2)
             except ValueError:
                 pass
             self.scale_plots()
@@ -278,6 +286,10 @@ class SpectrumAnalyser:
             print("sample <frequency kHz> - sets the sampling frequency of 4kHz, 7kHz, or 9kHz")
             print("frame  <frame length>  - number of samples per frame {256, 512, 800, 1024}")
 
+        elif cmd[0] == 'mode':
+            self.mode = cmd[1]
+            return
+
         elif cmd[0] == 'filter':
             try:
                 new_fc = int(cmd[1])
@@ -286,7 +298,8 @@ class SpectrumAnalyser:
                 self.fc = int(cmd[1])
                 fn = self.fc/self.sample_freq
                 fnlo = self.fcl/self.sample_freq
-                self.b, self.a = sp.butter(4, [fnlo*2,fn*2], btype='bandpass')
+                self.blo, self.alo = sp.butter(2, fnlo*2, btype='highpass')
+                self.b, self.a = sp.butter(2, fn*2)
             except ValueError:
                 print("Filter Frequency must be < 4.5k")
                 return
@@ -305,8 +318,10 @@ class SpectrumAnalyser:
                 return
 
             fn = self.fc/self.sample_freq
+            fnlo = self.fcl/self.sample_freq
+            self.blo, self.alo = sp.butter(2, fnlo*2, btype='highpass')
             try:
-                self.b, self.a = sp.butter(4, fn*2)
+                self.b, self.a = sp.butter(2, fn*2)
             except ValueError:
                 pass
 
@@ -328,7 +343,6 @@ class SpectrumAnalyser:
                 print("Frame length must be 256, 512, 800, 1024")
                 return
 
-
     def scale_plots(self):
         """Scales the figures based on the current sampling frequency"""
         self.x = np.linspace(0, self.sample_no/self.sample_freq, self.sample_no)
@@ -342,16 +356,6 @@ class SpectrumAnalyser:
         self.xscale *= xscale
         self.yscale *= yscale
 
-    def align_music(self, freq):
-        """Scales the self.NOTES such that the given frequency is in range"""
-        while freq < self.NOTES.min() or freq > self.NOTES.max():
-            while freq > self.NOTES.max():
-                self.NOTES *= 2
-            while freq < self.NOTES.min():
-                self.NOTES /= 2
-        self.note_dict = dict([(freq, note) for freq, note in zip(self.NOTES, self.note_keys)])
-        return
-
     def set_plotdata(self, name, data_x, data_y):
         """Sets the data for the given plot name"""
         if name in self.traces:
@@ -359,21 +363,21 @@ class SpectrumAnalyser:
         else:
             if name == 'waveform':
                 self.traces[name] = self.waveform.plot(pen='c', width=3)
-                self.waveform.setYRange(-100, 100, padding=0)
+                self.waveform.setYRange(-50, 50, padding=0)
             if name == 'spectrum':
                 self.traces[name] = self.spectrum.plot(pen='m', width=3)
                 self.spectrum.setYRange(0, 1000, padding=0)
 
-    def tune(self, sp_data):
+    def tune(self, freq_peak):
         """
         Finds the closest frequency to a natural octave note from the input signal
         """
-        freq_peak = self.f[np.argmax(sp_data[10:])]
-        if freq_peak < 50:
+        if freq_peak < self.fcl:
             return
-        self.align_music(freq_peak)
-        tuning_freq = min(self.NOTES, key=lambda x: abs(x-freq_peak))
-
+        tuning_freq = self.get_tuning_freq(freq_peak)
+        # print(np.argwhere(self.NOTES == tuning_freq))
+        # print(self.NOTES)
+        # print(freq_peak)
         index_freq = np.argwhere(self.NOTES == tuning_freq)[0][0]
         bands = np.zeros(5)
         bands[2] = tuning_freq
@@ -400,16 +404,48 @@ class SpectrumAnalyser:
             self.board.send_command(int(LED+3))
         return
 
+    def get_tuning_freq(self, freq):
+        """Returns the not the current maxe frequency is closest to"""
+        if freq < 50:
+            return
+
+        while freq < self.NOTES.min() or freq > self.NOTES.max():
+            while freq > self.NOTES.max():
+                self.NOTES *= 2
+            while freq < self.NOTES.min():
+                self.NOTES /= 2
+        tuning_freq = min(self.NOTES, key=lambda x: abs(x-freq))
+        return tuning_freq
+
+    def record(self, freq):
+        tuning_freq = self.get_tuning_freq(freq)
+
+        if len(self.lock_sequence) > 10:
+            print(self.lock_sequence)
+            return
+
+        try:
+            if tuning_freq != self.lock_sequence[-1]:
+                self.lock_sequence.append(tuning_freq)
+        except IndexError as e:
+            if len(self.lock_sequence) == 0:
+                self.lock_sequence.append(tuning_freq)
+            else:
+                raise e
+
     def update(self):
         """Gathers new data and updates all the plots"""
-        wf_data = self.board.get_data()
+        try:
+            wf_data = self.board.get_data()
+        except struct.error:
+            print("[+] Unpacking error")
+            return
 
         # if the sample rate is high enough, filter to reduce quantisation error
+        wf_data = sp.filtfilt(self.blo, self.alo, wf_data)
         if self.fc < self.sample_freq/2:
             wf_data = sp.filtfilt(self.b, self.a, wf_data)
 
-        # take away any residual DC
-        wf_data -= int(np.mean(wf_data))
         self.set_plotdata(name='waveform', data_x=self.x, data_y=wf_data,)
 
         sp_data = np.abs(np.fft.rfft(wf_data))
@@ -417,7 +453,12 @@ class SpectrumAnalyser:
         self.set_plotdata(name='spectrum', data_x=self.f, data_y=sp_data)
 
         self.spectrogram_update(sp_data)
-        # self.tune(sp_data)
+        if self.mode == 'tune':
+            freq_peak = self.f[np.argmax(sp_data[10:])]
+            self.tune(freq_peak)
+        elif self.mode == 'record':
+            freq_peak = self.f[np.argmax(sp_data[10:])]
+            self.record(freq_peak)
 
     def spectrogram_update(self, sp_data):
         """Updates the spectrogram plot"""
