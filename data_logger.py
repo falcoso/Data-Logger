@@ -1,5 +1,6 @@
 import scipy.signal as sp
 import numpy as np
+from skimage.measure import compare_ssim
 
 
 class DataLogger:
@@ -12,6 +13,12 @@ class DataLogger:
 
         self.freq_lo = 100
         self.freq_hi = 2500
+
+        # middle octave for tuning
+        self.NOTES = np.array([440, 493.88, 523.25, 587.33, 659.25, 698.46, 783.99, 880])
+
+        # counter to keep track of recording
+        self.record_counter = 0
 
         # setup digital filters
         self.set_filters()
@@ -32,9 +39,9 @@ class DataLogger:
             pass
 
     def get_data_axis(self):
-        freq_bins = np.fft.rfftfreq(self.frame_len, 1/self.sample_freq)
-        time_bins = np.linspace(0, self.frame_len/self.sample_freq, self.frame_len)
-        return freq_bins, time_bins
+        self.freq_bins = np.fft.rfftfreq(self.frame_len, 1/self.sample_freq)
+        self.time_bins = np.linspace(0, self.frame_len/self.sample_freq, self.frame_len)
+        return self.freq_bins, self.time_bins
 
     def set_sample_freq(self, freq):
         self.sample_freq = freq
@@ -71,5 +78,82 @@ class DataLogger:
         psd = 20 * np.log10(sp_data + np.ones(len(sp_data))*0.1)
         self.specgram = np.roll(self.specgram, 1, 0)
         self.specgram[0] = psd
+        self.freq_peak = self.freq_bins[np.argmax(sp_data)]
 
         return sp_data, wf_data
+
+    def tune(self):
+        """
+        Finds the closest frequency to a natural octave note from the input signal
+        """
+        if self.freq_peak < self.freq_lo:
+            return
+        tuning_freq = self.get_tuning_freq(self.freq_peak)
+
+        # create 5 bins around the closest frequency to the current peak
+        index_freq = np.argwhere(self.NOTES == tuning_freq)[0][0]
+        bands = np.zeros(5)
+        bands[2] = tuning_freq
+        if index_freq == 0:
+            bands[0] = (tuning_freq + self.NOTES[-1]/2)/2
+        else:
+            bands[0] = (tuning_freq + self.NOTES[index_freq-1])/2
+
+        if index_freq == len(self.NOTES)-1:
+            bands[4] = (tuning_freq + self.NOTES[0]*2)/2
+        else:
+            bands[4] = (tuning_freq + self.NOTES[index_freq+1])/2
+
+        bands[1] = (bands[0] + bands[2])/2
+        bands[3] = (bands[4] + bands[2])/2
+
+        # find the LED to return by looking at the closest
+        bands -= self.freq_peak
+        LED = np.argmin(np.abs(bands))
+        return self.freq_peak, tuning_freq, LED
+
+    def get_tuning_freq(self, freq):
+        """Returns the not the current maxe frequency is closest to"""
+        if freq < self.freq_lo:
+            return
+
+        while freq < self.NOTES.min() or freq > self.NOTES.max():
+            while freq > self.NOTES.max():
+                self.NOTES *= 2
+            while freq < self.NOTES.min():
+                self.NOTES /= 2
+        tuning_freq = min(self.NOTES, key=lambda x: abs(x-freq))
+        return tuning_freq
+
+    def record(self, file_name):
+        self.record_counter += 1
+        if self.record_counter > self.spec_size:
+            fullname = "{}_{}_{}_{}.npy".format(file_name, self.sample_freq,
+                                                self.frame_len, self.spec_size)
+            np.save("./record_files/"+fullname, self.specgram)
+            print("Record saved as {}".format(fullname))
+            self.record_counter = 0
+            return True
+        else:
+            return False
+
+    def audio_match(self, cmp_file, new_file=None):
+        self.record_counter += 1
+        if self.record_counter > self.spec_size:
+            record_fullname = "{}_{}_{}_{}.npy".format(cmp_file, self.sample_freq,
+                                                       self.frame_len, self.spec_size)
+            record = np.load("./record_files/"+record_fullname)
+
+            mssim = compare_ssim(record, self.specgram, win_size=51)
+            print("MSSIM of new recording: {}".format(mssim))
+
+            if new_file is not None:
+                record_fullname = "{}_{}_{}.npy".format(new_file, self.sample_freq,
+                                                        self.frame_len, self.spec_size)
+                np.save("./record_files"+record_fullname, self.specgram)
+                print("Comparison saved as {}".format(record_fullname))
+
+            self.record_counter = 0
+            return True
+        else:
+            return False

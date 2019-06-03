@@ -61,18 +61,9 @@ class SpectrumGUI:
         self.data_analyser = DataLogger(self.board.sample_no, self.board.sample_freq)
         self.f, self.x = self.data_analyser.set_sample_freq(self.board.sample_freq)
 
-        self.record_counter =0
-        self.lock_hash = None
-
         self.mode = None
         self.xscale = 1
         self.yscale = 1
-
-        self.NOTES = np.array([440, 493.88, 523.25, 587.33, 659.25, 698.46, 783.99, 880])
-        self.note_keys = ["A", "B", "C", "D", "E", "F", "G", "A+"]
-        self.note_dict = dict([(freq, note) for freq, note in zip(self.NOTES, self.note_keys)])
-        # tell Arduino to start sending data
-        self.board.send_command("Send Data")
 
         # pyqtgraph stuff
         pg.setConfigOptions(antialias=True)
@@ -105,6 +96,9 @@ class SpectrumGUI:
 
         # waveform and spectrum x points
         self.scale_plots()
+
+        # tell Arduino to start sending data
+        self.board.send_command("Send Data")
 
     def keyPressed(self, evt):
         """
@@ -143,6 +137,18 @@ class SpectrumGUI:
             print("frame  <frame length>  - number of samples per frame {256, 512, 800, 1024}")
 
         elif cmd[0] == 'mode':
+            if cmd[1] in {'record', 'compare'}:
+                try:
+                    self.file_name = cmd[2]
+                except IndexError:
+                    print("Record/ Compare must have filename supplied")
+                    return
+            if cmd[1] == 'compare':
+                try:
+                    self.cmp_name = cmd[3]
+                except IndexError:
+                    self.cmp_name = None
+
             self.mode = cmd[1]
             return
 
@@ -210,85 +216,6 @@ class SpectrumGUI:
                 self.traces[name] = self.spectrum.plot(pen='m', width=3)
                 self.spectrum.setYRange(0, 1000, padding=0)
 
-    def tune(self, freq_peak):
-        """
-        Finds the closest frequency to a natural octave note from the input signal
-        """
-        if freq_peak < self.fcl:
-            return
-        tuning_freq = self.get_tuning_freq(freq_peak)
-        # print(np.argwhere(self.NOTES == tuning_freq))
-        # print(self.NOTES)
-        # print(freq_peak)
-        index_freq = np.argwhere(self.NOTES == tuning_freq)[0][0]
-        bands = np.zeros(5)
-        bands[2] = tuning_freq
-        if index_freq == 0:
-            bands[0] = (tuning_freq + self.NOTES[-1]/2)/2
-        else:
-            bands[0] = (tuning_freq + self.NOTES[index_freq-1])/2
-
-        if index_freq == len(self.NOTES)-1:
-            bands[4] = (tuning_freq + self.NOTES[0]*2)/2
-        else:
-            bands[4] = (tuning_freq + self.NOTES[index_freq+1])/2
-
-        bands[1] = (bands[0] + bands[2])/2
-        bands[3] = (bands[4] + bands[2])/2
-        # print(self.NOTES)
-        # print(bands)
-        bands -= freq_peak
-        LED = np.argmin(np.abs(bands))
-        if LED != self.board.LED:
-            self.board.LED = LED
-            print("[+] Actual peak: {}".format(freq_peak))
-            print("[+] Closest Note: {}".format(tuning_freq))
-            self.board.send_command(int(LED+3))
-        return
-
-    def get_tuning_freq(self, freq):
-        """Returns the not the current maxe frequency is closest to"""
-        if freq < 50:
-            return
-
-        while freq < self.NOTES.min() or freq > self.NOTES.max():
-            while freq > self.NOTES.max():
-                self.NOTES *= 2
-            while freq < self.NOTES.min():
-                self.NOTES /= 2
-        tuning_freq = min(self.NOTES, key=lambda x: abs(x-freq))
-        return tuning_freq
-
-    def record(self, freq):
-        self.record_counter += 1
-        if self.record_counter > 100:
-            if self.lock_hash is None:
-                print("Initial hash:")
-                self.lock_hash = imagehash.dhash(Image.fromarray(self.img_array), hash_size = 16)
-                np.save("outfile6.npy", self.img_array)
-            else:
-                print("Comparison hash:")
-                new_hash = imagehash.dhash(Image.fromarray(self.img_array),hash_size = 16)
-                print(new_hash)
-                print(self.lock_hash)
-                print(self.lock_hash-new_hash)
-                self.lock_hash = new_hash
-            self.record_counter = 0
-        # tuning_freq = self.get_tuning_freq(freq)
-        #
-        # if len(self.lock_sequence) > 10:
-        #     print(self.lock_sequence)
-        #     return
-        #
-        # try:
-        #     if tuning_freq != self.lock_sequence[-1]:
-        #         self.lock_sequence.append(tuning_freq)
-        # except IndexError as e:
-        #     if len(self.lock_sequence) == 0:
-        #         self.lock_sequence.append(tuning_freq)
-        #     else:
-        #         raise e
-
     def update(self):
         """Gathers new data and updates all the plots"""
         try:
@@ -306,11 +233,14 @@ class SpectrumGUI:
                           autoLevels=False)
 
         if self.mode == 'tune':
-            freq_peak = self.f[np.argmax(sp_data[10:])]
-            self.tune(freq_peak)
+            self.data_analyser.tune()
         elif self.mode == 'record':
-            freq_peak = self.f[np.argmax(sp_data[10:])]
-            self.record(freq_peak)
+            if self.data_analyser.record(self.file_name):
+                self.mode = 'standby'
+
+        elif self.mode == 'compare':
+            if self.data_analyser.audio_match(self.file_name, self.cmp_name):
+                self.mode = 'standby'
 
     def animation(self):
         timer = QtCore.QTimer()
