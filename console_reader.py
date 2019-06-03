@@ -1,6 +1,7 @@
 import pyqtgraph as pg
 from pyqtgraph.Qt import QtGui, QtCore
 import numpy as np
+import scipy.signal as sp
 import sys
 import serial
 import logging as log
@@ -42,9 +43,11 @@ class ArduinoBoard:
     get_data(self):
         Reads data from the Arduino.
     """
+
     def __init__(self, port, baud, timeout):
         self.board = serial.Serial(port, baud, timeout=timeout)
         self.sample_no, self.sample_freq = self.setup()
+        self.LED = 0  # current LED that is lit
         return
 
     def setup(self):
@@ -71,16 +74,20 @@ class ArduinoBoard:
         Sends the desired command to the Arduino
         """
         log.debug("send_command input: {}".format(message))
-        message_dict = {"Sample 4k": '0',
-                        "Standby": '1',
+        message_dict = {"Standby": '1',
                         "Send Data": '2',
                         "LED1": '3',
                         "LED2": '4',
                         "LED3": '5',
                         "LED4": '6',
                         "LED7": '7',
+                        "Sample 4k": '0',
                         "Sample 6k": '8',
-                        "Sample 8k": '9'}
+                        "Sample 8k": '9',
+                        "Frame 256": 'a',
+                        "Frame 512": 'b',
+                        "Frame 800": 'c',
+                        "Frame 1024": 'd'}
 
         inverted_dict = dict([(label, key) for key, label in message_dict.items()])
 
@@ -124,7 +131,6 @@ class ArduinoBoard:
     def get_data(self):
         """Reads data from the Arduino"""
         data = self.board.read(self.sample_no)
-        log.debug(len(data))
         data = np.array(struct.unpack('b'*self.sample_no, data))
         return data
 
@@ -174,10 +180,17 @@ class SpectrumAnalyser:
     spectrogram_update(self, sp_data):
         Updates the spectrogram plot
     """
+
     def __init__(self):
-        self.board = ArduinoBoard("/dev/ttyACM0", 115200, timeout=5)
+        self.board = ArduinoBoard("/dev/ttyACM0", 230400, timeout=5)
         self.sample_no = self.board.sample_no
         self.sample_freq = self.board.sample_freq
+        self.fc = 2500
+        fn = self.fc/self.sample_freq
+        try:
+            self.b, self.a = sp.butter(4, fn*2)
+        except ValueError:
+            pass
         self.xscale = 1
         self.yscale = 1
 
@@ -227,21 +240,59 @@ class SpectrumAnalyser:
         command to the Arduino, and re-scales the axis if sampling frequency
         is changed.
         """
-        msg = int(chr(evt.key()))
+        msg = chr(evt.key())
+        if msg == ' ':
+            cmd = input('>>\n')
+            cmd = cmd.split(' ')
+            if cmd[0] == 'f':
+                freqs = {'4': 0, '7': 8, '9': 9}
+                msg = freqs[cmd[1]]
+        else:
+            msg = int(msg)
         if msg in {0, 8, 9}:
             if msg == 0:
                 self.sample_freq = 4000
                 self.board.sample_freq = 4000
             elif msg == 8:
-                self.sample_freq = 6000
-                self.board.sample_freq = 6000
+                self.sample_freq = 7000
+                self.board.sample_freq = 7000
             elif msg == 9:
-                self.sample_freq = 8000
-                self.board.sample_freq = 8000
+                self.sample_freq = 9000
+                self.board.sample_freq = 9000
 
+            fn = self.fc/self.sample_freq
+            try:
+                self.b, self.a = sp.butter(4, fn*2)
+            except ValueError:
+                pass
             self.scale_plots()
+            self.board.send_command(msg)
 
-        self.board.send_command(msg)
+    def txt_command(self, cmd):
+        """Converts a text based input into a command to send to the board."""
+        cmd = cmd.split(' ')
+        if cmd[0] == 'h':
+            print(
+                """
+Text based interface:
+filt   <frequency kHz> - sets the low pass digital filter frequency < 4.5kHz
+sample <frequency kHz> - sets the sampling frequency of 4kHz, 7kHz, or 9kHz
+frame  <frame length>  - number of samples per frame < 1024
+""")
+        elif cmd[0] == 'filter':
+            try:
+                new_fc = int(cmd[1])
+                if new_fc > 4500:
+                    raise ValueError('')
+                self.fc = int(cmd[1])
+                fn = self.fc/self.sample_freq
+                self.b, self.a = sp.butter(4, fn*2)
+            except ValueError:
+                print("Filter Frequency must be < 4.5k")
+
+        elif cmd[0] == 'sample':
+            pass
+
 
     def scale_plots(self):
         """Scales the figures based on the current sampling frequency"""
@@ -255,7 +306,6 @@ class SpectrumAnalyser:
         self.img.scale(xscale, yscale)
         self.xscale *= xscale
         self.yscale *= yscale
-
 
     def align_music(self, freq):
         """Scales the self.NOTES such that the given frequency is in range"""
@@ -284,9 +334,12 @@ class SpectrumAnalyser:
         Finds the closest frequency to a natural octave note from the input signal
         """
         freq_peak = self.f[np.argmax(sp_data[10:])]
+        if freq_peak < 50:
+            return
         self.align_music(freq_peak)
         tuning_freq = min(self.NOTES, key=lambda x: abs(x-freq_peak))
-        index_freq = np.argwhere(self.NOTES == tuning_freq)[0]
+
+        index_freq = np.argwhere(self.NOTES == tuning_freq)[0][0]
         bands = np.zeros(5)
         bands[2] = tuning_freq
         if index_freq == 0:
@@ -297,28 +350,39 @@ class SpectrumAnalyser:
         if index_freq == len(self.NOTES)-1:
             bands[4] = (tuning_freq + self.NOTES[0]*2)/2
         else:
-            bands[4] = (tuning_freq + self.NOTES[index_freq+1]*2)/2
+            bands[4] = (tuning_freq + self.NOTES[index_freq+1])/2
 
         bands[1] = (bands[0] + bands[2])/2
         bands[3] = (bands[4] + bands[2])/2
+        # print(self.NOTES)
+        # print(bands)
         bands -= freq_peak
         LED = np.argmin(np.abs(bands))
-        # print(tuning_freq)
-        self.board.send_command(int(LED+3))
+        if LED != self.board.LED:
+            self.board.LED = LED
+            print("[+] Actual peak: {}".format(freq_peak))
+            print("[+] Closest Note: {}".format(tuning_freq))
+            self.board.send_command(int(LED+3))
         return
 
     def update(self):
         """Gathers new data and updates all the plots"""
         wf_data = self.board.get_data()
-        wf_data2 =wf_data - int(np.mean(wf_data))
+
+        # if the sample rate is high enough, filter to reduce quantisation error
+        if self.fc < self.sample_freq/2:
+            wf_data = sp.filtfilt(self.b, self.a, wf_data)
+
+        # take away any residual DC
+        wf_data -= int(np.mean(wf_data))
         self.set_plotdata(name='waveform', data_x=self.x, data_y=wf_data,)
 
         sp_data = np.abs(np.fft.rfft(wf_data))
-        # self.tune(sp_data)
 
         self.set_plotdata(name='spectrum', data_x=self.f, data_y=sp_data)
 
         self.spectrogram_update(sp_data)
+        # self.tune(sp_data)
 
     def spectrogram_update(self, sp_data):
         """Updates the spectrogram plot"""

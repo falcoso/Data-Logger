@@ -31,12 +31,27 @@ void Analyser::read_terminal()
     cmd = Serial.read() - '0';
     if (cmd == 0) sample_freq = SAMPLE_FREQ1;
     else if(cmd < 3) mode = static_cast<state>(cmd);
-    else if(cmd < 8) digitalWrite(cmd, !digitalRead(cmd));
+    else if(cmd < 8)
+    {   // two of the LEDs are mounted the wrong way round, so swap them so they
+        // can light in numerical order
+        if(cmd == 6)      cmd=7;
+        else if(cmd == 7) cmd =6;
+
+        digitalWrite(cmd, HIGH);
+        for(int i=3; i<8; i++)
+        {
+            if(i != cmd)  digitalWrite(i, LOW);
+        }
+    }
     else if(cmd == 8) sample_freq = SAMPLE_FREQ2;
     else if(cmd == 9) sample_freq = SAMPLE_FREQ3;
 
     if (cmd <= 9)
     {
+        // swap back
+        if(cmd == 6)      cmd=7;
+        else if(cmd == 7) cmd =6;
+
         Serial.print("Recieved: ");
         Serial.println(cmd);
     }
@@ -51,7 +66,6 @@ void Analyser::collect_data()
     static float y_old = 0;
     float x;
     float y;
-    // int x_old=0;
 
     for(int i=0; i<FRAME_LEN; i++)
     {
@@ -59,9 +73,14 @@ void Analyser::collect_data()
         //Apply DC block to data
         x = (float)(analogRead(0));
         y = x - x_old + 0.995* y_old;
-        data[i] = (char)(y);
         x_old = x;
         y_old = y;
+
+        //clip signal to stop overflow
+        if (y > 127.0) y = 127.0;
+        if (y < -127.0) y = -127.0;
+
+        data[i] = (char)(y);
         while(micros() < (microseconds + sampling_period_us)){}
     }
     // store final element for first element of new frame

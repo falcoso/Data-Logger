@@ -3,13 +3,12 @@
 
 #include <Arduino.h>
 
-#define FRAME_LEN 400
+#define FRAME_LEN 1024
 #define SAMPLE_FREQ1 4000
-#define SAMPLE_FREQ2 6000
-#define SAMPLE_FREQ3 8000
+#define SAMPLE_FREQ2 7000
+#define SAMPLE_FREQ3 9000
 #define FILTER_GAIN 1
-#define ALPHA = 0.3
-#define BAUD 115200
+#define BAUD 230400
 
 enum class state{SETUP, FFT, AUDIO};
 
