@@ -28,7 +28,21 @@ void Analyser::read_terminal()
     if(!Serial.available()) return;
 
 
-    cmd = Serial.read() - '0';
+    cmd = Serial.read();
+
+    //go through non-numeric commands
+    if(cmd=='a' or cmd == 'b' or cmd=='c')
+    {
+        if (cmd =='a') frame_len = 256;
+        else if (cmd =='b') frame_len = 512;
+        else if (cmd =='c') frame_len = 800;
+        else if (cmd =='d') frame_len = 1024;
+        Serial.print("Recieved: ");
+        Serial.println(static_cast<char>(cmd));
+    }
+    else cmd -= '0';
+
+    // go through numeric commands
     if (cmd == 0) sample_freq = SAMPLE_FREQ1;
     else if(cmd < 3) mode = static_cast<state>(cmd);
     else if(cmd < 8)
@@ -67,7 +81,7 @@ void Analyser::collect_data()
     float x;
     float y;
 
-    for(int i=0; i<FRAME_LEN; i++)
+    for(int i=0; i<frame_len; i++)
     {
         microseconds = micros();    //Overflows after around 70 minutes!
         //Apply DC block to data
@@ -90,6 +104,6 @@ void Analyser::send_data()
 {
     if(mode == state::AUDIO)
     {
-        Serial.write(data, sizeof(data));
+        Serial.write(data, frame_len);
     }
 }

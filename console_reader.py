@@ -82,8 +82,8 @@ class ArduinoBoard:
                         "LED4": '6',
                         "LED7": '7',
                         "Sample 4k": '0',
-                        "Sample 6k": '8',
-                        "Sample 8k": '9',
+                        "Sample 7k": '8',
+                        "Sample 9k": '9',
                         "Frame 256": 'a',
                         "Frame 512": 'b',
                         "Frame 800": 'c',
@@ -186,9 +186,11 @@ class SpectrumAnalyser:
         self.sample_no = self.board.sample_no
         self.sample_freq = self.board.sample_freq
         self.fc = 2500
+        self.fcl = 100
         fn = self.fc/self.sample_freq
+        fnlo = self.fcl/self.sample_freq
         try:
-            self.b, self.a = sp.butter(4, fn*2)
+            self.b, self.a = sp.butter(4, [fnlo*2,fn*2], btype='bandpass')
         except ValueError:
             pass
         self.xscale = 1
@@ -243,10 +245,8 @@ class SpectrumAnalyser:
         msg = chr(evt.key())
         if msg == ' ':
             cmd = input('>>\n')
-            cmd = cmd.split(' ')
-            if cmd[0] == 'f':
-                freqs = {'4': 0, '7': 8, '9': 9}
-                msg = freqs[cmd[1]]
+            self.txt_command(cmd)
+            return
         else:
             msg = int(msg)
         if msg in {0, 8, 9}:
@@ -261,8 +261,9 @@ class SpectrumAnalyser:
                 self.board.sample_freq = 9000
 
             fn = self.fc/self.sample_freq
+            fnlo = self.fcl/self.sample_freq
             try:
-                self.b, self.a = sp.butter(4, fn*2)
+                self.b, self.a = sp.butter(4, [fnlo*2,fn*2], btype='bandpass')
             except ValueError:
                 pass
             self.scale_plots()
@@ -272,13 +273,11 @@ class SpectrumAnalyser:
         """Converts a text based input into a command to send to the board."""
         cmd = cmd.split(' ')
         if cmd[0] == 'h':
-            print(
-                """
-Text based interface:
-filt   <frequency kHz> - sets the low pass digital filter frequency < 4.5kHz
-sample <frequency kHz> - sets the sampling frequency of 4kHz, 7kHz, or 9kHz
-frame  <frame length>  - number of samples per frame < 1024
-""")
+            print("Text based interface:")
+            print("filt   <frequency kHz> - sets the low pass digital filter frequency < 4.5kHz")
+            print("sample <frequency kHz> - sets the sampling frequency of 4kHz, 7kHz, or 9kHz")
+            print("frame  <frame length>  - number of samples per frame {256, 512, 800, 1024}")
+
         elif cmd[0] == 'filter':
             try:
                 new_fc = int(cmd[1])
@@ -286,12 +285,48 @@ frame  <frame length>  - number of samples per frame < 1024
                     raise ValueError('')
                 self.fc = int(cmd[1])
                 fn = self.fc/self.sample_freq
-                self.b, self.a = sp.butter(4, fn*2)
+                fnlo = self.fcl/self.sample_freq
+                self.b, self.a = sp.butter(4, [fnlo*2,fn*2], btype='bandpass')
             except ValueError:
                 print("Filter Frequency must be < 4.5k")
+                return
 
         elif cmd[0] == 'sample':
-            pass
+            try:
+                cmd = int(cmd[1])
+                if cmd not in {4, 7, 9}:
+                    raise ValueError()
+                else:
+                    self.sample_freq = cmd*1000
+                    self.board.sample_freq = cmd*1000
+
+            except ValueError:
+                print("Sample rate must be 4, 7, or 9 kHz")
+                return
+
+            fn = self.fc/self.sample_freq
+            try:
+                self.b, self.a = sp.butter(4, fn*2)
+            except ValueError:
+                pass
+
+            self.board.send_command("Sample {}k".format(int(cmd)))
+            self.scale_plots()
+
+        elif cmd[0] == 'frame':
+            try:
+                cmd = int(cmd[1])
+                if cmd not in {256, 512, 800, 1024}:
+                    raise ValueError()
+                else:
+                    self.sample_no = cmd
+                    self.board.sample_no = cmd
+                self.img_array = np.zeros((100, int(self.sample_no/2+1)))
+                self.board.send_command("Frame {}".format(cmd))
+                self.scale_plots()
+            except ValueError:
+                print("Frame length must be 256, 512, 800, 1024")
+                return
 
 
     def scale_plots(self):
@@ -432,6 +467,6 @@ class KeyPressWindow(pg.GraphicsWindow):
 
 
 if __name__ == "__main__":
-    # log.basicConfig(level=log.DEBUG)
+    log.basicConfig(level=log.DEBUG)
     audio_app = SpectrumAnalyser()
     audio_app.animation()
