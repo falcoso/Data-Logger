@@ -1,5 +1,6 @@
 import scipy.signal as sp
 import numpy as np
+import glob
 from skimage.measure import compare_ssim
 
 
@@ -137,21 +138,50 @@ class DataLogger:
         else:
             return False
 
-    def audio_match(self, cmp_file, new_file=None):
+    def audio_match(self, cmp_file=None, new_file=None):
         self.record_counter += 1
         if self.record_counter > self.spec_size:
-            record_fullname = "{}_{}_{}_{}.npy".format(cmp_file, self.sample_freq,
-                                                       self.frame_len, self.spec_size)
-            record = np.load("./record_files/"+record_fullname)
+            if cmp_file is None:
+                footer = "_{}_{}_{}.npy".format(self.sample_freq, self.frame_len,
+                                                self.spec_size)
 
-            mssim = compare_ssim(record, self.specgram, win_size=51)
-            print("MSSIM of new recording: {}".format(mssim))
+                files = glob.glob("./record_files/*{}".format(footer))
+                match = ''
+                mssim_best = -10
+                for file in files:
+                    record = np.load(file)
+                    mssim = compare_ssim(record, self.specgram, win_size=51)
+                    if mssim > mssim_best:
+                        match = file
+                        mssim_best = mssim
+                    print("MSSIM of compared to {}: {}".format(file, mssim))
 
-            if new_file is not None:
-                record_fullname = "{}_{}_{}.npy".format(new_file, self.sample_freq,
-                                                        self.frame_len, self.spec_size)
-                np.save("./record_files"+record_fullname, self.specgram)
-                print("Comparison saved as {}".format(record_fullname))
+                file_name = match
+                match = match.replace(footer, '')
+                match = match.replace("./record_files/", '')
+                print("Best estimate: {}".format(match))
+                match_split = match.split('_')
+                if match_split[-1].isdigit():
+                    file_name = match.replace(match_split[-1], '')
+                    file_name += str(int(match_split[-1])+1) + footer
+                else:
+                    file_name = match + '_1' + footer
+                np.save("./record_files/"+file_name, self.specgram)
+                print("Record saved as {}".format(file_name))
+
+            else:
+                record_fullname = "{}_{}_{}_{}.npy".format(cmp_file, self.sample_freq,
+                                                           self.frame_len, self.spec_size)
+                record = np.load("./record_files/"+record_fullname)
+
+                mssim = compare_ssim(record, self.specgram, win_size=51)
+                print("MSSIM of new recording: {}".format(mssim))
+
+                if new_file is not None:
+                    record_fullname = "{}_{}_{}.npy".format(new_file, self.sample_freq,
+                                                            self.frame_len, self.spec_size)
+                    np.save("./record_files"+record_fullname, self.specgram)
+                    print("Comparison saved as {}".format(record_fullname))
 
             self.record_counter = 0
             return True

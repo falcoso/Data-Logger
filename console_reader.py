@@ -130,6 +130,7 @@ class SpectrumGUI:
     def txt_command(self, cmd):
         """Converts a text based input into a command to send to the board."""
         cmd = cmd.split(' ')
+        print(cmd)
         if cmd[0] == 'h':
             print("Text based interface:")
             print("filt   <frequency kHz> - sets the low pass digital filter frequency < 4.5kHz")
@@ -137,13 +138,17 @@ class SpectrumGUI:
             print("frame  <frame length>  - number of samples per frame {256, 512, 800, 1024}")
 
         elif cmd[0] == 'mode':
-            if cmd[1] in {'record', 'compare'}:
+            if cmd[1] == 'record':
                 try:
                     self.file_name = cmd[2]
                 except IndexError:
                     print("Record/ Compare must have filename supplied")
                     return
             if cmd[1] == 'compare':
+                try:
+                    self.file_name = cmd[2]
+                except IndexError:
+                    self.file_name = None
                 try:
                     self.cmp_name = cmd[3]
                 except IndexError:
