@@ -92,7 +92,7 @@ class SpectrumGUI:
         lut = cmap.getLookupTable(0.0, 1.0, 256)
 
         self.img.setLookupTable(lut)
-        self.img.setLevels([20*np.log10(1), 20*np.log10(600)])
+        self.img.setLevels([20*np.log10(10), 20*np.log10(10000)])
 
         # waveform and spectrum x points
         self.scale_plots()
@@ -216,10 +216,10 @@ class SpectrumGUI:
         else:
             if name == 'waveform':
                 self.traces[name] = self.waveform.plot(pen='c', width=3)
-                self.waveform.setYRange(-50, 50, padding=0)
+                self.waveform.setYRange(-150, 150, padding=0)
             if name == 'spectrum':
                 self.traces[name] = self.spectrum.plot(pen='m', width=3)
-                self.spectrum.setYRange(0, 1000, padding=0)
+                self.spectrum.setYRange(0, 10000, padding=0)
 
     def update(self):
         """Gathers new data and updates all the plots"""
@@ -238,7 +238,8 @@ class SpectrumGUI:
                           autoLevels=False)
 
         if self.mode == 'tune':
-            self.data_analyser.tune()
+            peak, note, LED = self.data_analyser.tune()
+            self.board.send_command(int(LED+3))
         elif self.mode == 'record':
             if self.data_analyser.record(self.file_name):
                 self.mode = 'standby'
@@ -284,6 +285,6 @@ class KeyPressWindow(pg.GraphicsWindow):
 
 
 if __name__ == "__main__":
-    log.basicConfig(level=log.DEBUG)
+    # log.basicConfig(level=log.DEBUG)
     audio_app = SpectrumGUI()
     audio_app.animation()

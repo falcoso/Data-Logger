@@ -12,7 +12,7 @@ class DataLogger:
 
         self.specgram = np.zeros((self.spec_size, int(self.frame_len/2+1)))
 
-        self.freq_lo = 100
+        self.freq_lo = 150
         self.freq_hi = 2500
 
         # middle octave for tuning
@@ -33,7 +33,7 @@ class DataLogger:
         fn_lo = self.freq_lo/self.sample_freq
         fn_hi = self.freq_hi/self.sample_freq
 
-        self.blo, self.alo = sp.butter(2, fn_lo*2, btype='highpass')
+        self.blo, self.alo = sp.butter(4, fn_lo*2, btype='highpass')
         try:
             self.b, self.a = sp.butter(2, fn_hi*2)
         except ValueError:
@@ -162,12 +162,12 @@ class DataLogger:
                 print("Best estimate: {}".format(match))
                 match_split = match.split('_')
                 if match_split[-1].isdigit():
-                    file_name = match.replace(match_split[-1], '')
-                    file_name += str(int(match_split[-1])+1) + footer
-                else:
-                    file_name = match + '_1' + footer
-                np.save("./record_files/"+file_name, self.specgram)
-                print("Record saved as {}".format(file_name))
+                    match = match.replace(match_split[-1], '')
+
+                files = glob.glob("./record_files/{}*".format(match))
+                match += str(len(files)+1) + footer
+                np.save("./record_files/"+match, self.specgram)
+                print("Record saved as {}".format(match))
 
             else:
                 record_fullname = "{}_{}_{}_{}.npy".format(cmp_file, self.sample_freq,
